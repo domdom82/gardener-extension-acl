@@ -17,13 +17,15 @@ package controller
 
 import (
 	"context"
-
+	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-
 	controllerconfig "github.com/stackitcloud/gardener-extension-acl/pkg/controller/config"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 const (
@@ -57,14 +59,18 @@ func AddToManager(ctx context.Context, mgr manager.Manager) error {
 // AddToManagerWithOptions adds a controller with the given Options to the given manager.
 // The opts.Reconciler is being set with a newly instantiated actuator.
 func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts *AddOptions) error {
+	defaultPredicates := extension.DefaultPredicates(ctx, mgr, DefaultAddOptions.IgnoreOperationAnnotation)
 	return extension.Add(ctx, mgr, extension.AddArgs{
 		Actuator:          NewActuator(mgr, opts.ExtensionConfig),
 		ControllerOptions: opts.ControllerOptions,
 		Name:              Type + suffix,
 		FinalizerSuffix:   Type + suffix,
 		Resync:            0,
-		Predicates:        extension.DefaultPredicates(ctx, mgr, DefaultAddOptions.IgnoreOperationAnnotation),
+		Predicates:        defaultPredicates,
 		Type:              Type,
 		ExtensionClass:    opts.ExtensionClass,
+		WatchBuilder: extensionscontroller.NewWatchBuilder(func(ctrl controller.Controller) error {
+			return ctrl.Watch(source.Kind[client.Object](mgr.GetCache(), &extensionsv1alpha1.Infrastructure{}, &handler.EnqueueRequestForObject{}, defaultPredicates...))
+		}),
 	})
 }
