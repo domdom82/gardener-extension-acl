@@ -17,6 +17,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 
 	extensionscontroller "github.com/gardener/gardener/extensions/pkg/controller"
 	"github.com/gardener/gardener/extensions/pkg/controller/extension"
@@ -81,8 +82,10 @@ func AddToManagerWithOptions(ctx context.Context, mgr manager.Manager, opts *Add
 func infrastructurePredicate() predicate.TypedFuncs[*extensionsv1alpha1.Infrastructure] {
 	return predicate.TypedFuncs[*extensionsv1alpha1.Infrastructure]{
 		UpdateFunc: func(e event.TypedUpdateEvent[*extensionsv1alpha1.Infrastructure]) bool {
-			// We want to reconcile if the status of the Infrastructure changed
-			return !apiequality.Semantic.DeepEqual(e.ObjectOld.Status, e.ObjectNew.Status)
+			// We want to reconcile if the EgressCIDRs of the Infrastructure changed
+			slices.Sort(e.ObjectOld.Status.EgressCIDRs)
+			slices.Sort(e.ObjectNew.Status.EgressCIDRs)
+			return !apiequality.Semantic.DeepEqual(e.ObjectOld.Status.EgressCIDRs, e.ObjectNew.Status.EgressCIDRs)
 		},
 		CreateFunc: func(_ event.TypedCreateEvent[*extensionsv1alpha1.Infrastructure]) bool {
 			return false
