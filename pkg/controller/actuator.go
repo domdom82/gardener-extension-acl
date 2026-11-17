@@ -64,10 +64,9 @@ const (
 	// ImageName is used for the image vector override.
 	// This is currently not implemented correctly.
 	// TODO implement
-	ImageName          = "image-name"
-	deletionTimeout    = 2 * time.Minute
-	istioGatewayName   = "kube-apiserver"
-	ingressGatewayName = "nginx-ingress-controller"
+	ImageName        = "image-name"
+	deletionTimeout  = 2 * time.Minute
+	istioGatewayName = "kube-apiserver"
 )
 
 // Error variables for controller pkg
@@ -325,28 +324,24 @@ func (a *actuator) createSeedResources(
 		return err
 	}
 
+	ingressHosts, err := a.findIngressHosts(ctx, namespace, helper.GetSeedIngressDomain(cluster.Seed))
+	if err != nil {
+		return err
+	}
+
+	ingressEnvoyFilterSpec, err := envoyfilters.BuildIngressEnvoyFilterSpecForHelmChart(
+		spec.Rule, ingressHosts, alwaysAllowedCIDRs, istioLabels)
+	if err != nil {
+		return err
+	}
+
 	cfg := map[string]interface{}{
 		"shootName":                cluster.Shoot.Status.TechnicalID,
 		"targetNamespace":          istioNamespace,
 		"apiEnvoyFilterSpec":       apiEnvoyFilterSpec,
 		"vpnEnvoyFilterSpec":       vpnEnvoyFilterSpec,
 		"httpProxyEnvoyFilterSpec": httpProxyEnvoyFilterSpec,
-	}
-
-	defaultLabels, err := a.findDefaultIstioLabels(ctx)
-	if client.IgnoreNotFound(err) != nil {
-		return err
-	} else if err == nil {
-		// The `nginx-ingress-controller` Gateway object only exists in g/g@v1.89, (introduced with
-		// https://github.com/gardener/gardener/pull/9038).
-		// If it doesn't exist yet, we can't apply ACLs to shoot ingresses.
-		ingressEnvoyFilterSpec, err := envoyfilters.BuildIngressEnvoyFilterSpecForHelmChart(
-			cluster, spec.Rule, alwaysAllowedCIDRs, defaultLabels)
-		if err != nil {
-			return err
-		}
-
-		cfg["ingressEnvoyFilterSpec"] = ingressEnvoyFilterSpec
+		"ingressEnvoyFilterSpec":   ingressEnvoyFilterSpec,
 	}
 
 	cfg, err = chart.InjectImages(cfg, imagevector.ImageVector(), []string{ImageName})
@@ -474,23 +469,32 @@ func (a *actuator) findIstioNamespaceForExtension(
 	return deployments.Items[0].Namespace, gw.Spec.Selector, nil
 }
 
-func (a *actuator) findDefaultIstioLabels(
-	ctx context.Context,
-) (
-	istioLabels map[string]string,
-	err error,
-) {
-	gw := istionetworkv1beta1.Gateway{}
-
-	err = a.client.Get(ctx, client.ObjectKey{
-		Namespace: v1beta1constants.GardenNamespace,
-		Name:      ingressGatewayName,
-	}, &gw)
-	if err != nil {
+// findIngressHosts lists all Istio Gateway resources in the shoot namespace and
+// collects every host that belongs to the seed ingress domain. These are the
+// exact SNI values present in the istio-ingressgateway filter chains for this shoot.
+func (a *actuator) findIngressHosts(ctx context.Context, namespace, seedIngressDomain string) ([]string, error) {
+	if seedIngressDomain == "" {
+		return nil, nil
+	}
+	gwList := istionetworkv1beta1.GatewayList{}
+	if err := a.client.List(ctx, &gwList, client.InNamespace(namespace)); err != nil {
 		return nil, err
 	}
-
-	return gw.Spec.Selector, nil
+	var hosts []string
+	suffix := "." + seedIngressDomain
+	for i := range gwList.Items {
+		for _, server := range gwList.Items[i].Spec.Servers {
+			// One server entry maps to one filter chain; use only the first matching
+			// host to avoid inserting the RBAC filter multiple times on the same chain.
+			for _, host := range server.Hosts {
+				if strings.HasSuffix(host, suffix) {
+					hosts = append(hosts, host)
+					break
+				}
+			}
+		}
+	}
+	return hosts, nil
 }
 
 // usesProxyTypeLBService checks the `istio-ingressgateway` LoadBalancer Service
