@@ -1,0 +1,12 @@
+apiVersion: core.gardener.cloud/v1beta1
+kind: ControllerRegistration
+metadata:
+  name: acl
+spec:
+  resources:
+  - kind: Extension
+    type: acl
+    lifecycle:
+      reconcile: BeforeKubeAPIServer
+      delete: AfterKubeAPIServer
+      migrate: AfterKubeAPIServer

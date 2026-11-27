@@ -7,6 +7,9 @@ configurations:
 resources:
 - controller-registration.yaml
 
+patches:
+- path: patch-lifecycle.yaml
+
 images:
 - name: ghcr.io/stackitcloud/gardener-extension-acl
   newTag: latest
